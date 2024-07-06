@@ -18,8 +18,9 @@ func main() {
 	r.LoadHTMLGlob(tmplPath)
 
 	r.GET("/", handlers.IndexHandler)
-	r.GET("/ws", handlers.WebsocketHandler)
-	r.GET("/users", handlers.UsersHandler)
+	r.GET("/room/:id", handlers.RoomHandler)
+	r.GET("/ws/:id", handlers.WebsocketHandler)
+	r.GET("/room/:id/users", handlers.UsersHandler)
 
-	r.Run(":8080")
+	r.Run(":3000")
 }

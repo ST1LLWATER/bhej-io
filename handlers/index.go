@@ -20,6 +20,7 @@ var upgrader = websocket.Upgrader{
 type User struct {
 	ID   string `json:"id"`
 	Addr string `json:"addr"`
+	Name string `json:"name"`
 }
 
 type FileMessage struct {
@@ -32,7 +33,7 @@ type FileMessage struct {
 }
 
 var (
-	clients  = make(map[*websocket.Conn]User)
+	clients  = make(map[string]map[*websocket.Conn]User)
 	cliMutex sync.Mutex
 )
 
@@ -40,71 +41,77 @@ func IndexHandler(c *gin.Context) {
 	c.HTML(http.StatusOK, "index.html", nil)
 }
 
+func RoomHandler(c *gin.Context) {
+	c.HTML(http.StatusOK, "room.html", nil)
+}
+
 func WebsocketHandler(c *gin.Context) {
 	conn, err := upgrader.Upgrade(c.Writer, c.Request, nil)
-
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
 		return
 	}
-
 	defer conn.Close()
 
+	roomID := c.Param("id")
+	name := c.Query("name")
 	userID := uuid.New().String()
-	user := User{ID: userID, Addr: conn.RemoteAddr().String()}
+	user := User{ID: userID, Addr: conn.RemoteAddr().String(), Name: name}
+
+	log.Println("inserting room to clients:", roomID)
 
 	cliMutex.Lock()
-	clients[conn] = user
+	if _, ok := clients[roomID]; !ok {
+		clients[roomID] = make(map[*websocket.Conn]User)
+	}
+	clients[roomID][conn] = user
 	cliMutex.Unlock()
 
-	broadcastUsers()
+	broadcastUsers(roomID)
 
 	defer func() {
 		cliMutex.Lock()
-		delete(clients, conn)
+		delete(clients[roomID], conn)
+		if len(clients[roomID]) == 0 {
+			delete(clients, roomID)
+		}
 		cliMutex.Unlock()
-		broadcastUsers()
+		broadcastUsers(roomID)
 	}()
 
 	for {
 		messageType, msg, err := conn.ReadMessage()
-		log.Println("MESSAGE TYPE: ", messageType)
 		if err != nil {
 			log.Println("Error reading message: ", err)
 			break
 		}
 
-		// if messageType == websocket.BinaryMessage {
-		log.Println("RECEIVING FILE BINARY MESSAGE")
-		handleFileMessage(conn, msg)
-		// }
-
+		if messageType == websocket.BinaryMessage {
+			handleFileMessage(roomID, conn, msg)
+		}
 	}
 }
 
-func broadcastUsers() {
+func broadcastUsers(roomID string) {
 	cliMutex.Lock()
-
 	defer cliMutex.Unlock()
 
-	users := make([]User, 0, len(clients))
-
-	for _, user := range clients {
+	users := make([]User, 0, len(clients[roomID]))
+	for _, user := range clients[roomID] {
 		users = append(users, user)
 	}
 
 	userList, err := json.Marshal(users)
-
 	if err != nil {
 		log.Println("Error marshalling users: ", err)
 		return
 	}
 
-	for conn := range clients {
+	for conn := range clients[roomID] {
 		err := conn.WriteMessage(websocket.TextMessage, userList)
 		if err != nil {
 			conn.Close()
-			delete(clients, conn)
+			delete(clients[roomID], conn)
 		}
 	}
 }
@@ -113,13 +120,17 @@ func UsersHandler(c *gin.Context) {
 	cliMutex.Lock()
 	defer cliMutex.Unlock()
 
-	users := make([]User, 0, len(clients))
+	roomID := c.Param("id")
 
-	for _, user := range clients {
-		users = append(users, user)
+	if roomClients, ok := clients[roomID]; ok {
+		users := make([]User, 0, len(roomClients))
+		for _, user := range roomClients {
+			users = append(users, user)
+		}
+		c.JSON(http.StatusOK, users)
+	} else {
+		c.JSON(http.StatusNotFound, gin.H{"error": "Room not found"})
 	}
-
-	c.JSON(http.StatusOK, users)
 }
 
 // func handleFileMessage(sender *websocket.Conn, fileData []byte) {
@@ -159,7 +170,7 @@ func UsersHandler(c *gin.Context) {
 // 	}
 // }
 
-func handleFileMessage(sender *websocket.Conn, fileData []byte) {
+func handleFileMessage(roomID string, sender *websocket.Conn, fileData []byte) {
 	log.Println("Handling file message")
 	var fileMessage FileMessage
 	err := json.Unmarshal(fileData, &fileMessage)
@@ -168,7 +179,7 @@ func handleFileMessage(sender *websocket.Conn, fileData []byte) {
 		return
 	}
 
-	fileMessage.SenderID = clients[sender].ID
+	fileMessage.SenderID = clients[roomID][sender].ID
 
 	dataToSend, err := json.Marshal(fileMessage)
 	if err != nil {
@@ -179,23 +190,22 @@ func handleFileMessage(sender *websocket.Conn, fileData []byte) {
 	cliMutex.Lock()
 	defer cliMutex.Unlock()
 
-	// Create a wait group to ensure all goroutines finish
 	var wg sync.WaitGroup
 
-	for conn := range clients {
-		wg.Add(1) // Increment the WaitGroup counter
+	for conn := range clients[roomID] {
+		wg.Add(1)
 		go func(conn *websocket.Conn) {
-			defer wg.Done() // Decrement the counter when the goroutine completes
+			defer wg.Done()
 			err := conn.WriteMessage(websocket.BinaryMessage, dataToSend)
 			if err != nil {
 				log.Println("Error sending message to client: ", err)
 				conn.Close()
-				delete(clients, conn)
+				delete(clients[roomID], conn)
 			}
 		}(conn)
 	}
 
-	wg.Wait() // Wait here until all goroutines finish
+	wg.Wait()
 }
 
 // func handleFileMessage(sender *websocket.Conn, fileData []byte) {

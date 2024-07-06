@@ -3,268 +3,194 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Concurrent Downloader</title>
-    <script src="https://unpkg.com/htmx.org@1.4.0"></script>
-    <script src="https://jimmywarting.github.io/StreamSaver.js/StreamSaver.js"></script>
+    <title>Bhej-io</title>
+    <link
+      href="https://cdnjs.cloudflare.com/ajax/libs/tailwindcss/2.2.19/tailwind.min.css"
+      rel="stylesheet"
+    />
+    <script
+      src="https://unpkg.com/htmx.org@2.0.0"
+      integrity="sha384-wS5l5IKJBvK6sPTKa2WZ1js3d947pvWXbPJ1OmWfEuxLgeHcEbjUUA5i9V5ZkpCw"
+      crossorigin="anonymous"
+    ></script>
   </head>
-  <body>
-    <h1>Concurrent Downloader</h1>
-    <input type="file" id="fileInput" />
-    <button onclick="sendFile()">Send File</button>
-    <div id="progress"></div>
-    <div id="downloadLinks"></div>
+  <body class="bg-gray-900 text-white min-h-screen flex flex-col">
+    <!-- Navbar -->
+    <nav class="bg-gray-800 shadow">
+      <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+        <div class="flex justify-between h-16">
+          <div class="flex">
+            <a
+              href="#"
+              class="flex-shrink-0 flex items-center text-2xl font-bold text-white"
+            >
+              Bhej-io
+            </a>
+          </div>
+        </div>
+      </div>
+    </nav>
 
-    <h2>Users in Room</h2>
-    <div id="users" hx-swap-oob="true"></div>
+    <!-- Content -->
+    <div class="flex flex-1 items-center justify-center">
+      <div class="text-center">
+        <h1 class="text-5xl font-bold mb-6">Welcome to Bhej-io</h1>
+        <p class="text-xl mb-4">Click the button to create or join a room.</p>
+        <div class="flex justify-center space-x-4">
+          <button
+            class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+            hx-on:click="showNameModal()"
+          >
+            Create Room
+          </button>
+          <button
+            class="bg-green-500 hover:bg-green-700 text-white font-bold py-2 px-4 rounded"
+            hx-on:click="showJoinModal()"
+          >
+            Join Room
+          </button>
+        </div>
+      </div>
+    </div>
 
+    <!-- Join Room Modal -->
+    <div
+      id="joinModal"
+      class="hidden fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center"
+    >
+      <div class="bg-white rounded-lg p-6 text-gray-900">
+        <h2 class="text-xl font-bold mb-4">Join Room</h2>
+        <form id="joinRoomForm">
+          <div class="mb-4">
+            <label for="userName" class="block text-sm font-medium">Name</label>
+            <input
+              type="text"
+              id="userName"
+              name="userName"
+              class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
+              required
+            />
+          </div>
+          <div class="mb-4">
+            <label for="roomId" class="block text-sm font-medium"
+              >Room ID</label
+            >
+            <input
+              type="text"
+              id="roomId"
+              name="roomId"
+              class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
+              required
+            />
+          </div>
+          <div class="flex justify-end space-x-4">
+            <button
+              type="button"
+              class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded"
+              hx-on:click="closeJoinModal()"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+            >
+              Join
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Name Modal -->
+    <div
+      id="nameModal"
+      class="hidden fixed inset-0 bg-gray-800 bg-opacity-75 flex items-center justify-center"
+    >
+      <div class="bg-white rounded-lg p-6 text-gray-900">
+        <h2 class="text-xl font-bold mb-4">Join Room</h2>
+        <form onsubmit="generateRoom(event)" id="createRoomForm">
+          <div class="mb-4">
+            <label for="userName" class="block text-sm font-medium">Name</label>
+            <input
+              type="text"
+              name="userName"
+              class="mt-1 block w-full px-3 py-2 border border-gray-300 rounded-md shadow-sm"
+              required
+            />
+          </div>
+          <div class="flex justify-end space-x-4">
+            <button
+              type="button"
+              class="bg-gray-500 hover:bg-gray-700 text-white font-bold py-2 px-4 rounded"
+              hx-on:click="closeJoinModal()"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              class="bg-blue-500 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded"
+            >
+              Create
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <!-- Script -->
     <script>
-      const socket = new WebSocket('ws://localhost:8080/ws');
-      const receivedFiles = {};
-      let fileStream;
-      let writer;
-      const chunkSize = 1024 * 1024; // 1 MB chunks
-      let allowed = false;
-
-      // async function startDownload(file_name) {
-      //   const filename = file_name;
-
-      //   // Create a ReadableStream that we'll use to feed data to StreamSaver
-      //   const readableStream = new ReadableStream({
-      //     start(controller) {
-      //       // We'll use this controller in our WebSocket onmessage handler
-      //       window.streamController = controller;
-      //     },
-      //     cancel() {
-      //       console.log('User canceled the download');
-      //     },
-      //   });
-
-      //   // Start the StreamSaver download
-      //   fileStream = streamSaver.createWriteStream(filename, {
-      //     // size: totalChunks * chunkSize,
-      //   });
-
-      //   // This is where we connect our ReadableStream to StreamSaver's WritableStream
-      //   readableStream.pipeTo(fileStream);
-
-      //   const downloadLink = document.createElement('a');
-      //   downloadLink.href = '#';
-      //   downloadLink.textContent = 'Download in progress...';
-      //   document.body.appendChild(downloadLink);
-      // }
-
-      socket.onopen = function () {
-        console.log('Connected');
-      };
-
-      socket.onmessage = function (event) {
-        if (event.data instanceof Blob) {
-          event.data.arrayBuffer().then(async (buffer) => {
-            console.log('Received file chunk:', buffer);
-            const fileMessage = JSON.parse(new TextDecoder().decode(buffer));
-            if (!allowed) {
-              // startDownload(fileMessage.file_name, fileMessage.file_size);
-              fileStream = streamSaver.createWriteStream(
-                fileMessage.file_name,
-                {
-                  size: fileMessage.file_size,
-                }
-              );
-              writer = fileStream.getWriter();
-              allowed = true;
-            }
-            handleFileChunk(fileMessage);
-          });
-        } else {
-          const users = JSON.parse(event.data);
-          const userList = document.getElementById('users');
-          userList.innerHTML = '';
-          users.forEach((user) => {
-            const userDiv = document.createElement('div');
-            userDiv.innerText = `User: ${user.Addr} (ID: ${user.ID})`;
-            userDiv.id = `user-${user.ID}`;
-            userList.appendChild(userDiv);
-          });
-        }
-      };
-
-      function sendFile() {
-        const fileInput = document.getElementById('fileInput');
-        const file = fileInput.files[0];
-        const chunkSize = 1024 * 1024; // 1 MB chunks
-        let offset = 0;
-        let chunkIndex = 0;
-
-        function readChunk() {
-          const reader = new FileReader();
-          const chunk = file.slice(offset, offset + chunkSize);
-          reader.onload = function (e) {
-            console.log('READING AS TYPE: ', typeof e.target.result);
-            if (e.target.result.byteLength === 0) {
-              console.error('Read zero bytes from file chunk!');
-              return; // Handle error appropriately
-            }
-            const fileMessage = {
-              file_name: file.name,
-              chunk_index: chunkIndex,
-              file_size: file.size,
-              total_chunks: Math.ceil(file.size / chunkSize),
-              chunk_data: Array.from(new Uint8Array(e.target.result)),
-            };
-            socket.send(JSON.stringify(fileMessage));
-            offset += chunk.size;
-            chunkIndex++;
-            updateProgress(offset, file.size);
-            if (offset < file.size) {
-              readChunk();
-            } else {
-              console.log('File sent successfully');
-            }
-          };
-          reader.readAsArrayBuffer(chunk);
-        }
-        readChunk();
+      function generateUUID() {
+        return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(
+          /[xy]/g,
+          function (c) {
+            var r = (Math.random() * 16) | 0,
+              v = c === 'x' ? r : (r & 0x3) | 0x8;
+            return v.toString(16);
+          }
+        );
       }
 
-      function base64ToArrayBuffer(base64) {
-        var binary_string = window.atob(base64);
-        var len = binary_string.length;
-        var bytes = new Uint8Array(len);
-        for (var i = 0; i < len; i++) {
-          bytes[i] = binary_string.charCodeAt(i);
-        }
-        return bytes.buffer;
+      function generateRoom(event) {
+        event.preventDefault();
+        const uuid = generateUUID();
+        const userName = event.target.elements.userName.value;
+        window.location.href = `/room/${uuid}?name=${encodeURIComponent(
+          userName
+        )}`;
       }
 
-      function updateProgress(current, total) {
-        const percent = Math.round((current / total) * 100);
-        document.getElementById('progress').innerText = `Progress: ${percent}%`;
+      function showNameModal() {
+        document.getElementById('nameModal').classList.remove('hidden');
       }
 
-      async function handleFileChunk(fileMessage) {
-        const { file_name, chunk_index, chunk_data, total_chunks } =
-          fileMessage;
-
-        console.log({ file_name, chunk_index, total_chunks });
-
-        const arrayBuffer = base64ToArrayBuffer(chunk_data);
-        const chunk = new Uint8Array(arrayBuffer);
-
-        try {
-          await writer.write(chunk);
-        } catch (error) {
-          console.error('Error writing chunk to fileStream:', error);
-        }
-
-        if (chunk_index === total_chunks - 1) {
-          writer.close(() => {
-            console.log('File stream closed');
-          });
-        }
-
-        // console.log('Type of read chunk: ', typeof chunk_data);
-        // // Initialize the file array if it does not exist
-        // if (!receivedFiles[file_name]) {
-        //   receivedFiles[file_name] = new Array(total_chunks).fill(undefined);
-        // }
-
-        // if (chunk_data instanceof ArrayBuffer) {
-        //   console.log('chunk_data is an ArrayBuffer');
-        //   receivedFiles[file_name][chunk_index] = new Uint8Array(chunk_data);
-        // } else {
-        //   if (typeof chunk_data === 'string') {
-        //     const arrayBuffer = base64ToArrayBuffer(chunk_data);
-        //     receivedFiles[file_name][chunk_index] = new Uint8Array(arrayBuffer);
-        //   } else {
-        //     console.error('Chunk data format errors');
-        //   }
-        // }
-
-        // Convert the chunk_data back into a Uint8Array
-        // console.log('ADDING CHUNK DATA', file_name, chunk_index, chunk_data);
-        // receivedFiles[file_name][chunk_index] = new Uint8Array(chunk_data);
-
-        // console.log(
-        //   '🚀 ~ file: index.html:106 ~ handleFileChunk ~ receivedFiles:',
-        //   receivedFiles
-        // );
-
-        // TODO: Uncomment on usual flow
-        // if (receivedFiles[file_name].every((chunk) => chunk !== undefined)) {
-        //   console.log('All chunks received for', file_name);
-        //   startDownload(file_name);
-        // }
+      function closeNameModal() {
+        document.getElementById('nameModal').classList.add('hidden');
       }
 
-      // function startDownload(fileName) {
-      //   console.log('Starting download for', fileName, receivedFiles);
-      //   const chunks = receivedFiles[fileName].map(
-      //     (chunk) => new Uint8Array(chunk)
-      //   );
-      //   const blob = new Blob(chunks, { type: 'application/octet-stream' });
-      //   if (blob.size === 0) {
-      //     console.error('Blob created with size 0 bytes!');
-      //     return; // Handle error appropriately
-      //   }
-      //   const url = URL.createObjectURL(blob);
-
-      //   const downloadLink = document.createElement('a');
-      //   downloadLink.href = url;
-      //   downloadLink.download = fileName;
-      //   document.body.appendChild(downloadLink);
-      //   downloadLink.click();
-
-      //   document.body.removeChild(downloadLink);
-      //   URL.revokeObjectURL(url);
-      // }
-
-      function startOrUpdateDownload(fileName) {
-        const chunks = receivedFiles[fileName];
-        const blob = new Blob(chunks, { type: 'application/octet-stream' });
-        const url = URL.createObjectURL(blob);
-
-        let downloadLink = document.getElementById(`download-${fileName}`);
-        if (!downloadLink) {
-          downloadLink = document.createElement('a');
-          downloadLink.id = `download-${fileName}`;
-          downloadLink.style.display = 'none';
-          document.body.appendChild(downloadLink);
-        }
-
-        downloadLink.href = url;
-        downloadLink.download = fileName;
-
-        // Trigger the download
-        downloadLink.click();
-
-        // Clean up
-        URL.revokeObjectURL(url);
-
-        console.log(`Started/Updated download for ${fileName}`);
+      function showJoinModal() {
+        document.getElementById('joinModal').classList.remove('hidden');
       }
 
-      function updateDownloadLink(fileName) {
-        const chunks = receivedFiles[fileName];
-        const blob = new Blob(chunks, { type: 'application/octet-stream' });
-        const url = URL.createObjectURL(blob);
-
-        let downloadLink = document.getElementById(`download-${fileName}`);
-        if (!downloadLink) {
-          downloadLink = document.createElement('a');
-          downloadLink.id = `download-${fileName}`;
-          downloadLink.textContent = `Download ${fileName}`;
-          document.getElementById('downloadLinks').appendChild(downloadLink);
-        }
-
-        downloadLink.href = url;
-        downloadLink.download = fileName;
-
-        console.log(`Updated download link for ${fileName}`);
+      function closeJoinModal() {
+        document.getElementById('joinModal').classList.add('hidden');
       }
 
-      setInterval(function () {
-        htmx.ajax('GET', '/users', { target: '#users', swap: 'innerHTML' });
-      }, 5000);
+      function joinRoom(event) {
+        event.preventDefault();
+        const form = document.getElementById('joinRoomForm');
+        const userName = form.userName.value;
+        const roomId = form.roomId.value;
+        window.location.href = `/room/${roomId}?name=${encodeURIComponent(
+          userName
+        )}`;
+      }
+
+      document
+        .getElementById('joinRoomForm')
+        .addEventListener('submit', joinRoom);
+
+      // Registering the event listener for htmx
     </script>
   </body>
 </html>
